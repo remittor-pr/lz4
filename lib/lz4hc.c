@@ -469,7 +469,8 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     BYTE* oend)
 {
     size_t length;
-    BYTE* const token = (*op)++;
+    BYTE* const token = *op;
+    BYTE* const saved_op = *op;
 
 #if defined(LZ4_DEBUG) && (LZ4_DEBUG >= 6)
     static const BYTE* start = NULL;
@@ -490,7 +491,10 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
 
     /* Encode Literal length */
     length = (size_t)(*ip - *anchor);
-    if ((limit) && ((*op + (length / 255) + length + (2 + 1 + LASTLITERALS)) > oend)) return 1;   /* Check output limit */
+    if ((limit) && ((*op + (length / 255) + length + (2 + 1 + LASTLITERALS)) > oend)) {
+        // nothing
+        return 1;   /* Check output limit */
+    }
     if (length >= RUN_MASK) {
         size_t len = length - RUN_MASK;
         *token = (RUN_MASK << ML_BITS);
@@ -511,7 +515,16 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     /* Encode MatchLength */
     assert(matchLength >= MINMATCH);
     length = (size_t)matchLength - MINMATCH;
-    if ((limit) && (*op + (length / 255) + (1 + LASTLITERALS) > oend)) return 1;   /* Check output limit */
+    if ((limit) && (*op + (length / 255) + (1 + LASTLITERALS) > oend)) {
+      if (limit == fillOutput) {
+            ....
+            *ip += ...
+            *anchor = *ip;
+            return 2; /* ip, op, anchor is changed!!! */
+        }
+        *op = saved_op;
+        return 1;   /* Check output limit */
+    }
     if (length >= ML_MASK) {
         *token += ML_MASK;
         length -= ML_MASK;
@@ -549,7 +562,6 @@ LZ4_FORCE_INLINE int LZ4HC_compress_hashChain (
     const BYTE* const mflimit = iend - MFLIMIT;
     const BYTE* const matchlimit = (iend - LASTLITERALS);
 
-    BYTE* optr = (BYTE*) dest;
     BYTE* op = (BYTE*) dest;
     BYTE* oend = op + maxOutputSize;
 
@@ -585,7 +597,6 @@ _Search2:
         }
 
         if (ml2 == ml) { /* No better match => encode ML1 */
-            optr = op;
             if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, limit, oend)) goto _dest_overflow;
             continue;
         }
@@ -633,10 +644,8 @@ _Search3:
             /* ip & ref are known; Now for ml */
             if (start2 < ip+ml)  ml = (int)(start2 - ip);
             /* Now, encode 2 sequences */
-            optr = op;
             if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, limit, oend)) goto _dest_overflow;
             ip = start2;
-            optr = op;
             if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml2, ref2, limit, oend)) goto _dest_overflow;
             continue;
         }
@@ -655,7 +664,6 @@ _Search3:
                     }
                 }
 
-                optr = op;
                 if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, limit, oend)) goto _dest_overflow;
                 ip  = start3;
                 ref = ref3;
@@ -693,7 +701,6 @@ _Search3:
                 ml = (int)(start2 - ip);
             }
         }
-        optr = op;
         if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, limit, oend)) goto _dest_overflow;
 
         /* ML2 becomes ML1 */
@@ -733,13 +740,13 @@ _last_literals:
         op += lastRunSize;
     }
 
-    /* End */
-    *srcSizePtr = (int) (((const char*)ip) - source);
+    if (limit == fillOutput) {
+        *srcSizePtr = (int) (((const char*)ip) - source);
+    }
     return (int) (((char*)op)-dest);
 
 _dest_overflow:
     if (limit == fillOutput) {
-        op = optr;  /* restore correct out pointer */
         goto _last_literals;
     }
     return 0;
