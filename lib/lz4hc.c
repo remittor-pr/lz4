@@ -499,11 +499,24 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     totalCost += cost;
 #endif
 
-    /* Encode Literal length */
     litLength = (size_t)(ip - anchor);
-    if (outputDirective && (op + (litLength / 255) + litLength + (L_PREFIX_SIZE + LASTLITERALS)) > olimit) {
-        return (outputDirective == fillOutput) ? 1 : -1;
+
+    if (outputDirective == limitedOutput) {
+        /* Check output buffer overflow */
+        if (op + litLength + (L_PREFIX_SIZE + LASTLITERALS) + (litLength / 255) > olimit) {
+            return -1;   /* cannot compress within `dst` budget */
+        }
+    } else
+    if (outputDirective == fillOutput) {
+        size_t const litSize = LIT_SIZE(litLength);
+        /* min last literals so last match is <= end - MFLIMIT */
+        if (op + litSize + litLength + L_PREFIX_SIZE + MFLIMIT - MINMATCH > olimit) {
+            op = token;  /* restore op */
+            return 1;
+        }
     }
+
+    /* Encode Literal length */
     if (litLength >= RUN_MASK) {
         size_t len = litLength - RUN_MASK;
         *token = (RUN_MASK << ML_BITS);
@@ -517,6 +530,15 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     LZ4_wildCopy8(op, anchor, op + litLength);
     op += litLength;
 
+    if (outputDirective == fillOutput) {
+        /* min last literals so last match is <= end - MFLIMIT */
+        if (op + L_PREFIX_SIZE + MFLIMIT - MINMATCH > olimit) {
+            /* the match was too close to the end, rewind and go to last literals */
+            op = token;  /* restore op */
+            return 1;
+        }
+    }
+
     /* Encode Offset */
     assert(ip - match <= LZ4_DISTANCE_MAX);   /* note : consider providing offset as a value, rather than as a pointer difference */
     LZ4_writeLE16(op, (U16)(ip - match)); op += L_OFFSET_SIZE;
@@ -525,7 +547,13 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     assert(matchLength >= MINMATCH);
     litLength = (size_t)matchLength - MINMATCH;
     if (outputDirective && (op + (litLength / 255) + L_TOKEN_SIZE + LASTLITERALS) > olimit) {
-        return (outputDirective == fillOutput) ? 1 : -1;
+        if (outputDirective == fillOutput) {
+            ip += matchLength;
+            anchor = ip;
+            return 2; /* ip, op, anchor is changed!!! */
+        }
+        op = token;  /* restore op */
+        return 1;
     }
     if (litLength >= ML_MASK) {
         *token += ML_MASK;
