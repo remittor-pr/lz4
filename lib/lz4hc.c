@@ -443,6 +443,7 @@ LZ4HC_InsertAndGetWiderMatch (
                 matchIndex -= nextOffset;
     }   }   }
 
+    assert(longest >= 0);
     return longest;
 }
 
@@ -468,7 +469,7 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     const BYTE** ip,
     BYTE** op,
     const BYTE** anchor,
-    int matchLength,
+    size_t matchLength,
     const BYTE* const match,
     limitedOutput_directive outputDirective,
     BYTE* olimit)
@@ -558,7 +559,7 @@ LZ4_FORCE_INLINE int LZ4HC_compress_hashChain (
     BYTE* op = (BYTE*) dest;
     BYTE* olimit = op + maxOutputSize;
 
-    int   ml0, ml, ml2, ml3;
+    size_t ml0, ml, ml2, ml3;
     const BYTE* start0;
     const BYTE* ref0;
     const BYTE* ref = NULL;
@@ -574,16 +575,16 @@ LZ4_FORCE_INLINE int LZ4HC_compress_hashChain (
 
     /* Main Loop */
     while (ip <= mflimit) {
-        ml = LZ4HC_InsertAndFindBestMatch(ctx, ip, matchlimit, &ref, maxNbAttempts, patternAnalysis, dict);
-        if (ml<MINMATCH) { ip++; continue; }
+        ml = (size_t)LZ4HC_InsertAndFindBestMatch(ctx, ip, matchlimit, &ref, maxNbAttempts, patternAnalysis, dict);
+        if (ml < MINMATCH) { ip++; continue; }
 
         /* saved, in case we would skip too much */
         start0 = ip; ref0 = ref; ml0 = ml;
 
 _Search2:
         if (ip + ml <= mflimit) {
-            ml2 = LZ4HC_InsertAndGetWiderMatch(ctx,
-                            ip + ml - 2, ip + 0, matchlimit, ml, &ref2, &start2,
+            ml2 = (size_t)LZ4HC_InsertAndGetWiderMatch(ctx,
+                            ip + ml - 2, ip + 0, matchlimit, (int)ml, &ref2, &start2,
                             maxNbAttempts, patternAnalysis, 0, dict, favorCompressionRatio);
         } else {
             ml2 = ml;
@@ -591,7 +592,7 @@ _Search2:
 
         if (ml2 == ml) { /* No better match => encode ML1 */
             optr = op;
-            if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit)) goto _dest_overflow;
+            if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), (int)ml, ref, outputDirective, olimit)) goto _dest_overflow;
             continue;
         }
 
@@ -614,12 +615,13 @@ _Search3:
         *  ml2 > ml1, and
         *  ip1+3 <= ip2 (usually < ip1+ml1) */
         if (start2 - ip < OPTIMAL_ML) {
-            int correction;
-            int new_ml = ml;
+            size_t const mLen = (size_t)(start2 - ip);
+            size_t const max_ml = mLen + ml2 - MINMATCH;
+            size_t new_ml = ml;
             if (new_ml > OPTIMAL_ML) new_ml = OPTIMAL_ML;
-            if (ip + new_ml > start2 + ml2 - MINMATCH) new_ml = (int)(start2 - ip) + ml2 - MINMATCH;
-            correction = new_ml - (int)(start2 - ip);
-            if (correction > 0) {
+            if (new_ml > max_ml) new_ml = max_ml;
+            if (new_ml > mLen) {
+                size_t const correction = new_ml - mLen;
                 start2 += correction;
                 ref2 += correction;
                 ml2 -= correction;
@@ -629,7 +631,7 @@ _Search3:
 
         if (start2 + ml2 <= mflimit) {
             ml3 = LZ4HC_InsertAndGetWiderMatch(ctx,
-                            start2 + ml2 - 3, start2, matchlimit, ml2, &ref3, &start3,
+                            start2 + ml2 - 3, start2, matchlimit, (int)ml2, &ref3, &start3,
                             maxNbAttempts, patternAnalysis, 0, dict, favorCompressionRatio);
         } else {
             ml3 = ml2;
@@ -637,7 +639,7 @@ _Search3:
 
         if (ml3 == ml2) {  /* No better match => encode ML1 and ML2 */
             /* ip & ref are known; Now for ml */
-            if (start2 < ip + ml)  ml = (int)(start2 - ip);
+            if (start2 < ip + ml)  ml = (size_t)(start2 - ip);
             /* Now, encode 2 sequences */
             optr = op;
             if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit)) goto _dest_overflow;
@@ -650,7 +652,7 @@ _Search3:
         if (start3 < ip + ml + 3) {  /* Not enough space for match 2 : remove it */
             if (start3 >= ip + ml) {  /* can write Seq1 immediately ==> Seq2 is removed, so Seq3 becomes Seq1 */
                 if (start2 < ip + ml) {
-                    int correction = (int)(ip + ml - start2);
+                    size_t const correction = (size_t)(ip + ml - start2);
                     start2 += correction;
                     ref2 += correction;
                     ml2 -= correction;
@@ -685,18 +687,19 @@ _Search3:
         * ip & ref are known; Now decide ml.
         */
         if (start2 < ip + ml) {
-            if ((start2 - ip) < OPTIMAL_ML) {
-                int correction;
+            size_t const mLen = (size_t)(start2 - ip);
+            if (mLen < OPTIMAL_ML) {
+                size_t const max_ml = mLen + ml2 - MINMATCH;
                 if (ml > OPTIMAL_ML) ml = OPTIMAL_ML;
-                if (ip + ml > start2 + ml2 - MINMATCH) ml = (int)(start2 - ip) + ml2 - MINMATCH;
-                correction = ml - (int)(start2 - ip);
-                if (correction > 0) {
+                if (ml > max_ml) ml = max_ml;
+                if (ml > mLen) {
+                    size_t const correction = ml - mLen;
                     start2 += correction;
                     ref2 += correction;
                     ml2 -= correction;
                 }
             } else {
-                ml = (int)(start2 - ip);
+                ml = mLen;
             }
         }
         optr = op;
@@ -1270,7 +1273,7 @@ LZ4HC_FindLongerMatch(LZ4HC_CCtx_internal* const ctx,
     /* note : LZ4HC_InsertAndGetWiderMatch() is able to modify the starting position of a match (*startpos),
      * but this won't be the case here, as we define iLowLimit==ip,
      * so LZ4HC_InsertAndGetWiderMatch() won't be allowed to search past ip */
-    int matchLength = LZ4HC_InsertAndGetWiderMatch(ctx, ip, ip, iHighLimit, minLen, &matchPtr, &ip, nbSearches, 1 /*patternAnalysis*/, 1 /*chainSwap*/, dict, favorDecSpeed);
+    int matchLength = (int)LZ4HC_InsertAndGetWiderMatch(ctx, ip, ip, iHighLimit, minLen, &matchPtr, &ip, nbSearches, 1 /*patternAnalysis*/, 1 /*chainSwap*/, dict, favorDecSpeed);
     if (matchLength <= minLen) return match;
     if (favorDecSpeed) {
         if ((matchLength>18) & (matchLength<=36)) matchLength=18;   /* favor shortcut */
