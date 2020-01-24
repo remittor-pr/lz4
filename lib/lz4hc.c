@@ -464,7 +464,8 @@ int LZ4HC_InsertAndFindBestMatch(LZ4HC_CCtx_internal* const hc4,   /* Index tabl
 
 /* LZ4HC_encodeSequence() :
  * @return : 0 if ok,
- *           1 if buffer issue detected */
+ *          -1 if buffer issue detected
+ *           1 if buffer issue detected (fillOutput) */
 LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     const BYTE** _ip,
     BYTE** _op,
@@ -500,7 +501,9 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
 
     /* Encode Literal length */
     litLength = (size_t)(ip - anchor);
-    if (outputDirective && (op + (litLength / 255) + litLength + (L_PREFIX_SIZE + LASTLITERALS)) > olimit) return 1;   /* Check output limit */
+    if (outputDirective && (op + (litLength / 255) + litLength + (L_PREFIX_SIZE + LASTLITERALS)) > olimit) {
+        return (outputDirective == fillOutput) ? 1 : -1;
+    }
     if (litLength >= RUN_MASK) {
         size_t len = litLength - RUN_MASK;
         *token = (RUN_MASK << ML_BITS);
@@ -521,7 +524,9 @@ LZ4_FORCE_INLINE int LZ4HC_encodeSequence (
     /* Encode MatchLength */
     assert(matchLength >= MINMATCH);
     litLength = (size_t)matchLength - MINMATCH;
-    if (outputDirective && (op + (litLength / 255) + L_TOKEN_SIZE + LASTLITERALS) > olimit) return 1;   /* Check output limit */
+    if (outputDirective && (op + (litLength / 255) + L_TOKEN_SIZE + LASTLITERALS) > olimit) {
+        return (outputDirective == fillOutput) ? 1 : -1;
+    }
     if (litLength >= ML_MASK) {
         *token += ML_MASK;
         litLength -= ML_MASK;
@@ -562,10 +567,10 @@ LZ4_FORCE_INLINE int LZ4HC_compress_hashChain (
     const BYTE* const mflimit = iend - MFLIMIT;
     const BYTE* const matchlimit = (iend - LASTLITERALS);
 
-    BYTE* optr = (BYTE*) dest;
     BYTE* op = (BYTE*) dest;
     BYTE* olimit = op + maxOutputSize;
 
+    int esr;
     size_t ml0, ml, ml2, ml3;
     const BYTE* start0;
     const BYTE* ref0;
@@ -577,7 +582,6 @@ LZ4_FORCE_INLINE int LZ4HC_compress_hashChain (
 
     /* init */
     *srcSizePtr = 0;
-    if (outputDirective == fillOutput) olimit -= LASTLITERALS;                  /* Hack for support LZ4 format restriction */
     if (inputSize < LZ4_minLength) goto _last_literals;                  /* Input too small, no compression (all literals) */
 
     /* Main Loop */
@@ -598,8 +602,8 @@ _Search2:
         }
 
         if (ml2 == ml) { /* No better match => encode ML1 */
-            optr = op;
-            if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), (int)ml, ref, outputDirective, olimit)) goto _dest_overflow;
+            esr = LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), (int)ml, ref, outputDirective, olimit);
+            if (esr) goto _dest_overflow;
             continue;
         }
 
@@ -648,11 +652,11 @@ _Search3:
             /* ip & ref are known; Now for ml */
             if (start2 < ip + ml)  ml = (size_t)(start2 - ip);
             /* Now, encode 2 sequences */
-            optr = op;
-            if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit)) goto _dest_overflow;
+            esr = LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit);
+            if (esr) goto _dest_overflow;
             ip = start2;
-            optr = op;
-            if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml2, ref2, outputDirective, olimit)) goto _dest_overflow;
+            esr = LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml2, ref2, outputDirective, olimit);
+            if (esr) goto _dest_overflow;
             continue;
         }
 
@@ -670,8 +674,8 @@ _Search3:
                     }
                 }
 
-                optr = op;
-                if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit)) goto _dest_overflow;
+                esr = LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit);
+                if (esr) goto _dest_overflow;
                 ip  = start3;
                 ref = ref3;
                 ml  = ml3;
@@ -709,8 +713,8 @@ _Search3:
                 ml = mLen;
             }
         }
-        optr = op;
-        if (LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit)) goto _dest_overflow;
+        esr = LZ4HC_encodeSequence(UPDATABLE(ip, op, anchor), ml, ref, outputDirective, olimit);
+        if (esr) goto _dest_overflow;
 
         /* ML2 becomes ML1 */
         ip = start2; ref = ref2; ml = ml2;
@@ -727,7 +731,6 @@ _last_literals:
     {   size_t lastRun = (size_t)(iend - anchor);  /* literals */
         size_t litSize = LIT_SIZE(lastRun);
         size_t const totalSize = 1 + litSize + lastRun;
-        if (outputDirective == fillOutput) olimit += LASTLITERALS;  /* restore correct value */
         if (outputDirective && (op + totalSize > olimit)) {
             if (outputDirective == limitedOutput) return 0;  /* Check output limit */
             /* adapt lastRunSize to fill 'dest' */
@@ -754,8 +757,7 @@ _last_literals:
     return (int) (((char*)op) - dest);
 
 _dest_overflow:
-    if (outputDirective == fillOutput) {
-        op = optr;  /* restore correct out pointer */
+    if (outputDirective == fillOutput && esr > 0) {
         goto _last_literals;
     }
     return 0;
