@@ -240,26 +240,16 @@ static const int LZ4_minLength = (MFLIMIT+1);
 /*-************************************
 *  Types
 **************************************/
-#if defined(__cplusplus) || (defined (__STDC_VERSION__) && (__STDC_VERSION__ >= 199901L) /* C99 */)
-# include <stdint.h>
-  typedef  uint8_t BYTE;
-  typedef uint16_t U16;
-  typedef uint32_t U32;
-  typedef  int32_t S32;
-  typedef uint64_t U64;
-  typedef uintptr_t uptrval;
-#else
-# include <limits.h>
-# if UINT_MAX != 4294967295UL
-#   error "LZ4 code (when not C++ or C99) assumes that sizeof(int) == 4"
-# endif
-  typedef unsigned char       BYTE;
-  typedef unsigned short      U16;
-  typedef unsigned int        U32;
-  typedef   signed int        S32;
-  typedef unsigned long long  U64;
-  typedef size_t              uptrval;   /* generally true, except OpenVMS-64 */
-#endif
+#include <limits.h>
+#include <stdint.h>   /* if this file is missing, then you should create it yourself (or install glibc, etc) */
+
+typedef  uint8_t  BYTE;
+typedef uint16_t  U16;
+typedef uint32_t  U32;
+typedef  int32_t  S32;
+typedef uint64_t  U64;
+typedef uintptr_t uptrval;
+typedef  intptr_t sptrval;
 
 #if defined(__x86_64__)
   typedef U64    reg_t;   /* 64-bits in x32 mode */
