@@ -40,7 +40,7 @@ extern "C" {
 #define LZ4_H_2983827168210
 
 /* --- Dependency --- */
-#include <stddef.h>   /* size_t */
+#include <stddef.h>   /* size_t and ptrdiff_t */
 
 
 /**
