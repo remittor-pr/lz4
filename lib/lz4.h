@@ -585,11 +585,11 @@ LZ4LIB_STATIC_API void LZ4_attach_dictionary(LZ4_stream_t* workingStream, const 
 typedef struct LZ4_stream_t_internal LZ4_stream_t_internal;
 struct LZ4_stream_t_internal {
     uint32_t hashTable[LZ4_HASH_SIZE_U32];
-    uint32_t currentOffset;
-    uint32_t tableType;
+    size_t currentOffset;
+    size_t tableType;
     const uint8_t* dictionary;
     const LZ4_stream_t_internal* dictCtx;
-    uint32_t dictSize;
+    size_t dictSize;
 };
 
 typedef struct {
@@ -604,11 +604,11 @@ typedef struct {
 typedef struct LZ4_stream_t_internal LZ4_stream_t_internal;
 struct LZ4_stream_t_internal {
     unsigned int hashTable[LZ4_HASH_SIZE_U32];
-    unsigned int currentOffset;
-    unsigned int tableType;
+    size_t currentOffset;
+    size_t tableType;
     const unsigned char* dictionary;
     const LZ4_stream_t_internal* dictCtx;
-    unsigned int dictSize;
+    size_t dictSize;
 };
 
 typedef struct {
@@ -629,7 +629,7 @@ typedef struct {
  *  note : only use this definition in association with static linking !
  *    this definition is not API/ABI safe, and may change in a future version.
  */
-#define LZ4_STREAMSIZE_U64 ((1 << (LZ4_MEMORY_USAGE-3)) + 4 + ((sizeof(void*)==16) ? 4 : 0) /*AS-400*/ )
+#define LZ4_STREAMSIZE_U64 ((1 << (LZ4_MEMORY_USAGE-3)) + 5 + ((sizeof(void*)==16) ? 4 : 0) /*AS-400*/ )
 #define LZ4_STREAMSIZE     (LZ4_STREAMSIZE_U64 * sizeof(unsigned long long))
 union LZ4_stream_u {
     unsigned long long table[LZ4_STREAMSIZE_U64];
